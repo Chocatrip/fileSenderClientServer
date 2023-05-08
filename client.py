@@ -6,8 +6,11 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QLineEdi
 from PyQt5.QtGui import QPalette, QColor
 from PyQt5.QtCore import QTimer
 from PyQt5.QtGui import QPainter
+import logging
+from tqdm import tqdm
 
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
 class FileTransferThread(QThread):
     progress_signal = pyqtSignal(int)
@@ -23,9 +26,12 @@ class FileTransferThread(QThread):
         file_name = os.path.basename(self.file_path)
         file_size = os.path.getsize(self.file_path)
 
+        logging.info(f"Connecting to {self.host}:{self.port}...")
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect((self.host, self.port))
+        logging.info("Connected!")
 
+        logging.info(f"Sending file: {file_name} ({file_size} bytes)")
         file_name_length = len(file_name.encode())
         client_socket.sendall(file_name_length.to_bytes(4, 'big'))
         client_socket.sendall(file_name.encode())
@@ -33,6 +39,7 @@ class FileTransferThread(QThread):
 
         with open(self.file_path, 'rb') as f:
             sent = 0
+            progress_bar = tqdm(total=file_size, unit='B', unit_scale=True)
             while sent < file_size:
                 data = f.read(buffer_size)
                 if not data:
@@ -40,8 +47,12 @@ class FileTransferThread(QThread):
                 client_socket.sendall(data)
                 sent += len(data)
                 self.progress_signal.emit(sent)
+                progress_bar.update(len(data))
+            progress_bar.close()
 
         client_socket.close()
+        logging.info("File transfer completed.")
+
 
 class App(QWidget):
     def __init__(self):
@@ -139,7 +150,10 @@ class App(QWidget):
         file_path = self.file_entry.text()
 
         self.transfer_button.setEnabled(False)
-        self.progress.setMaximum(os.path.getsize(file_path))
+        try:
+            self.progress.setMaximum(os.path.getsize(file_path))    
+        except:
+            pass
 
         self.transfer_thread = FileTransferThread(host, port, file_path)
         self.transfer_thread.progress_signal.connect(self.update_progress)
